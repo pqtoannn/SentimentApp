@@ -1,0 +1,21 @@
+# Bỏ virtual environment
+.venv/
+venv/
+
+# Bỏ cache file của Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Bỏ database (nếu bạn không muốn push)
+*.db
+
+# Bỏ file môi trường
+.env
+
+# Bỏ VSCode settings (nếu muốn)
+.vscode/
+
+# Bỏ các file tạm
+*.log
