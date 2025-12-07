@@ -6,11 +6,19 @@ import torch
 import torch.nn.functional as F
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
+# --- 1. IMPORT HÀM XỬ LÝ TỪ UTILS ---
+# Đoạn này sẽ lấy hàm chuẩn hóa từ file utils.py
+try:
+    from utils import preprocess_text
+except ImportError:
+    st.error("⚠️ Lỗi: Không tìm thấy file 'utils.py'. Hãy tạo file này và 'const.py' cùng thư mục!")
+    st.stop()
+
 # ==========================================
-# 1. CẤU HÌNH TRANG & CSS
+# 2. CẤU HÌNH TRANG & CSS
 # ==========================================
 st.set_page_config(
-    page_title="Vietnamese Sentiment Analysis (Real AI)",
+    page_title="Vietnamese Sentiment Analysis (Final)",
     page_icon="🧠",
     layout="wide"
 )
@@ -24,49 +32,50 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. KHỐI XỬ LÝ AI (MODEL THẬT)
+# 3. KHỐI XỬ LÝ AI (MODEL THẬT)
 # ==========================================
 @st.cache_resource
 def load_ai_model():
     """
     Load model PhoBERT từ HuggingFace.
-    Quá trình này sẽ mất khoảng 30s - 1 phút ở lần chạy đầu tiên để tải model (khoảng 500MB).
     """
     model_name = "wonrax/phobert-base-vietnamese-sentiment"
     
-    print(f"Đang tải model: {model_name} ...")
+    # st.write(f"Đang tải model: {model_name} ...") # Bật dòng này nếu muốn xem log trên web
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForSequenceClassification.from_pretrained(model_name)
     
-    print("✅ Đã tải model thành công!")
     return tokenizer, model
 
 # Load model ngay khi app khởi động
 try:
-    with st.spinner("Đang khởi động AI Model (Lần đầu sẽ hơi lâu)..."):
-        tokenizer, model = load_ai_model()
+    # with st.spinner("Đang khởi động AI Model..."): # Tắt spinner để giao diện lên nhanh hơn nếu đã cache
+    tokenizer, model = load_ai_model()
 except Exception as e:
     st.error(f"Lỗi tải model: {e}")
     st.stop()
 
 def predict_sentiment(text):
     """
-    Dự đoán cảm xúc sử dụng model PhoBERT thật.
+    Dự đoán cảm xúc sử dụng model PhoBERT thật + Tiền xử lý (Preprocessing).
     """
     if not text:
         return None
 
-    # 1. Tokenize (Chuyển chữ thành số)
-    inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True, max_length=256)
+    # --- BƯỚC QUAN TRỌNG: CHUẨN HÓA VĂN BẢN TRƯỚC ---
+    # Ví dụ: "hang k tot" -> "hàng không tốt"
+    clean_text = preprocess_text(text)
+    # -----------------------------------------------
+
+    # 1. Tokenize văn bản ĐÃ LÀM SẠCH
+    inputs = tokenizer(clean_text, return_tensors="pt", truncation=True, padding=True, max_length=256)
     
     # 2. Đưa qua Model
     with torch.no_grad():
         outputs = model(**inputs)
-        # Tính xác suất (Softmax)
         probs = F.softmax(outputs.logits, dim=1)
     
     # 3. Lấy kết quả
-    # Model wonrax thường map: 0: NEG, 1: POS, 2: NEU
     labels_map = {0: "NEGATIVE", 1: "POSITIVE", 2: "NEUTRAL"}
     
     score_list = probs[0].tolist()
@@ -75,41 +84,43 @@ def predict_sentiment(text):
     
     label = labels_map[max_index]
     
-    return {"label": label, "score": max_score}
+    # Trả về cả clean_text để hiển thị cho người dùng xem AI đã sửa gì
+    return {"label": label, "score": max_score, "clean_text": clean_text}
 
 # ==========================================
-# 3. QUẢN LÝ SESSION STATE (LƯU LỊCH SỬ)
+# 4. QUẢN LÝ SESSION STATE (LƯU LỊCH SỬ)
 # ==========================================
 if 'history' not in st.session_state:
     st.session_state.history = []
 
-def add_to_history(text, label, score):
+def add_to_history(original, cleaned, label, score):
     st.session_state.history.insert(0, {
         "Thời gian": datetime.datetime.now().strftime("%H:%M:%S"),
-        "Câu gốc": text,
+        "Câu gốc": original,
+        "AI đã hiểu là": cleaned, # Thêm cột này để so sánh
         "Kết quả": label,
         "Độ tin cậy": f"{score:.2%}"
     })
 
 # ==========================================
-# 4. GIAO DIỆN CHÍNH
+# 5. GIAO DIỆN CHÍNH
 # ==========================================
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/4712/4712035.png", width=80)
     st.title("AI Control Panel")
     menu = st.radio("Chế độ:", ["Trang chủ (Single Test)", "Kiểm thử file (CSV Batch)"])
     st.success("✅ Model Status: Online")
-    st.caption(f"Model: wonrax/phobert")
+    st.info("💡 Đã bật tính năng tự động sửa lỗi (Auto-Correction).")
 
 # ==========================================
-# 5. CHỨC NĂNG 1: TRANG CHỦ
+# CHỨC NĂNG 1: TRANG CHỦ
 # ==========================================
 if menu == "Trang chủ (Single Test)":
     st.title("🧠 Phân tích cảm xúc (Real AI)")
     
     col_input, col_btn = st.columns([4, 1])
     with col_input:
-        user_input = st.text_input("Nhập câu cần phân tích:", placeholder="VD: Hàng dùng chán quá...")
+        user_input = st.text_input("Nhập câu cần phân tích:", placeholder="VD: mon an nay dzo qua (thử viết không dấu)...")
     with col_btn:
         st.write("") 
         st.write("")
@@ -120,7 +131,7 @@ if menu == "Trang chủ (Single Test)":
         result = predict_sentiment(user_input)
         
         # Lưu kết quả
-        add_to_history(user_input, result['label'], result['score'])
+        add_to_history(user_input, result['clean_text'], result['label'], result['score'])
         st.session_state.current_result = result
 
     # Hiển thị kết quả
@@ -128,6 +139,7 @@ if menu == "Trang chủ (Single Test)":
         res = st.session_state.current_result
         lbl = res['label']
         scr = res['score']
+        clean = res['clean_text']
         
         st.markdown("---")
         c1, c2 = st.columns([2, 1])
@@ -139,7 +151,10 @@ if menu == "Trang chủ (Single Test)":
                 st.error(f"### 😡 TIÊU CỰC (NEGATIVE)")
             else:
                 st.warning(f"### 😐 TRUNG TÍNH (NEUTRAL)")
-            st.write(f"Câu: *'{user_input}'*")
+            
+            st.write(f"Câu gốc: *'{user_input}'*")
+            # Hiển thị câu đã được chuẩn hóa để người dùng biết tại sao AI đoán vậy
+            st.caption(f"ℹ️ AI đã tự động sửa thành: **'{clean}'**")
 
         with c2:
             st.metric("Độ tin cậy AI", f"{scr:.2%}")
@@ -149,18 +164,16 @@ if menu == "Trang chủ (Single Test)":
     if len(st.session_state.history) > 0:
         st.markdown("---")
         st.subheader("📊 Lịch sử phân tích")
-        r1, r2 = st.columns([1, 2])
-        df_history = pd.DataFrame(st.session_state.history)
-        with r1:
-            st.bar_chart(df_history['Kết quả'].value_counts(), color="#ff4b4b")
-        with r2:
-            st.dataframe(df_history, use_container_width=True, height=250)
-            if st.button("Xóa lịch sử"):
-                st.session_state.history = []
-                st.rerun()
+        
+        # Nút xóa lịch sử
+        if st.button("Xóa lịch sử"):
+            st.session_state.history = []
+            st.rerun()
+            
+        st.dataframe(pd.DataFrame(st.session_state.history), use_container_width=True)
 
 # ==========================================
-# 6. CHỨC NĂNG 2: KIỂM THỬ CSV (BATCH TEST)
+# CHỨC NĂNG 2: KIỂM THỬ CSV (BATCH TEST)
 # ==========================================
 elif menu == "Kiểm thử file (CSV Batch)":
     st.title("📂 Kiểm thử hàng loạt (CSV)")
@@ -168,7 +181,6 @@ elif menu == "Kiểm thử file (CSV Batch)":
     uploaded_file = st.file_uploader("Upload file CSV (UTF-8)", type=["csv"])
     
     if uploaded_file:
-        # Thêm on_bad_lines='skip' để tránh lỗi dòng bị sai format
         try:
             df = pd.read_csv(uploaded_file, encoding='utf-8', on_bad_lines='skip')
             
@@ -179,11 +191,11 @@ elif menu == "Kiểm thử file (CSV Batch)":
                 st.write(f"Đang xem trước 3 dòng (Tổng: {len(df)} dòng):")
                 st.dataframe(df.head(3))
                 
-                if st.button("⚡ Chạy AI Phân tích (Sẽ mất thời gian)"):
+                if st.button("⚡ Chạy AI Phân tích"):
                     progress_bar = st.progress(0)
                     status_text = st.empty()
                     
-                    results, scores = [], []
+                    results, scores, cleaned_texts = [], [], []
                     total = len(df)
                     
                     start_time = time.time()
@@ -193,6 +205,7 @@ elif menu == "Kiểm thử file (CSV Batch)":
                         pred = predict_sentiment(str(row[text_col]))
                         results.append(pred['label'])
                         scores.append(pred['score'])
+                        cleaned_texts.append(pred['clean_text']) # Lưu cả text đã xử lý
                         
                         # Cập nhật tiến trình
                         prog = (i + 1) / total
@@ -202,6 +215,8 @@ elif menu == "Kiểm thử file (CSV Batch)":
                     end_time = time.time()
                     duration = end_time - start_time
                     
+                    # Thêm kết quả vào DataFrame
+                    df['Processed_Text'] = cleaned_texts # Cột mới: Text đã qua xử lý
                     df['AI_Label'] = results
                     df['AI_Score'] = scores
                     
@@ -216,7 +231,7 @@ elif menu == "Kiểm thử file (CSV Batch)":
                     
                     # Download
                     csv = df.to_csv(index=False).encode('utf-8-sig')
-                    st.download_button("📥 Tải kết quả về", csv, "ket_qua_ai_real.csv", "text/csv")
+                    st.download_button("📥 Tải kết quả về", csv, "ket_qua_ai_complete.csv", "text/csv")
             else:
                 st.error("Không tìm thấy cột 'text' hoặc 'content' trong file CSV.")
         except Exception as e:
